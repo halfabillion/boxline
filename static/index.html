@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Boxline — humans & agents</title>
+<style>
+  :root { --ink:#1a1a1a; --paper:#f6f1e7; --line:#2c2c2c; --accent:#0b6e4f; --muted:#6b6b6b; --p0:#0b6e4f; --p1:#b23a48; --p2:#3d5a80; --p3:#e09f3e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:var(--paper); color:var(--ink); }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin-bottom: 20px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom: 12px; }
+  input, button { font: inherit; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; background:#fff; }
+  button { cursor:pointer; background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  button.secondary { background:#fff; color:var(--ink); }
+  button:disabled { opacity:0.45; cursor:not-allowed; }
+  .panel { background:#fff; border:1.5px solid #ddd; border-radius: 14px; padding: 14px; margin-top: 14px; }
+  #board { width: min(100%, 420px); aspect-ratio: 1; display:block; margin: 8px auto; touch-action:none; }
+  .scores { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { padding:6px 10px; border-radius:999px; color:#fff; font-weight:600; font-size:0.9rem; }
+  .chip.s0{background:var(--p0)} .chip.s1{background:var(--p1)} .chip.s2{background:var(--p2)} .chip.s3{background:var(--p3)}
+  .chip.turn { outline: 3px solid #111; outline-offset: 2px; }
+  pre { white-space: pre-wrap; font-size: 0.8rem; max-height: 180px; overflow:auto; background:#111; color:#d7ffd7; padding:10px; border-radius:10px; }
+  a { color: var(--accent); }
+  .err { color:#b23a48; font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Boxline</h1>
+  <p class="sub">Dots and Boxes for 2–4 players. Humans in the browser; agents over a simple JSON API. <a href="/api/docs">API docs</a></p>
+  <div class="row">
+    <input id="name" placeholder="Your name" value="Human"/>
+    <button id="create">Create game</button>
+    <input id="code" placeholder="CODE" maxlength="6" style="width:7rem; text-transform:uppercase"/>
+    <button id="join" class="secondary">Join</button>
+    <button id="start" class="secondary">Start</button>
+    <button id="bot" class="secondary">Add bot</button>
+  </div>
+  <div id="meta" class="row"></div>
+  <div class="scores" id="scores"></div>
+  <canvas id="board" width="420" height="420"></canvas>
+  <p id="msg"></p>
+  <div class="panel">
+    <strong>Match log</strong>
+    <pre id="log"></pre>
+  </div>
+</main>
+<script>
+const COLORS = ['#0b6e4f','#b23a48','#3d5a80','#e09f3e'];
+let token=null, code=null, state=null, poll=null;
+const $ = id => document.getElementById(id);
+const msg = t => { $('msg').textContent = t || ''; };
+async function api(path, opts={}) {
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  if (token) headers['X-Player-Token'] = token;
+  const r = await fetch(path, Object.assign({}, opts, {headers}));
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function render() {
+  if (!state) return;
+  $('code').value = state.code;
+  $('meta').innerHTML = `<span>Status: <b>${state.status}</b></span>` +
+    (state.current_seat!=null ? `<span>Turn: seat ${state.current_seat}</span>` : '') +
+    (state.winner_seats ? `<span>Winners: ${state.winner_seats.join(',')}</span>` : '');
+  $('scores').innerHTML = (state.players||[]).map(p =>
+    `<span class="chip s${p.seat} ${state.current_seat===p.seat?'turn':''}">${p.name} · ${p.score}</span>`).join('');
+  $('log').textContent = (state.log||[]).map(e => JSON.stringify(e)).join('\n');
+  draw();
+}
+function draw() {
+  const c = $('board'); const ctx = c.getContext('2d');
+  const n = state.grid; const pad = 36; const cell = (c.width - 2*pad) / n;
+  ctx.clearRect(0,0,c.width,c.height);
+  // boxes
+  for (let r=0;r<n;r++) for (let q=0;q<n;q++) {
+    const own = state.boxes[r][q];
+    if (own!=null) {
+      ctx.fillStyle = COLORS[own%4]+'55';
+      ctx.fillRect(pad+q*cell, pad+r*cell, cell, cell);
+    }
+  }
+  // edges
+  const thick=8;
+  ctx.lineCap='round';
+  function edgeColor(owner){ return owner==null ? '#cfcfcf' : COLORS[owner%4]; }
+  for (let r=0;r<=n;r++) for (let q=0;q<n;q++) {
+    const o = state.edges.h[r][q];
+    ctx.strokeStyle = edgeColor(o); ctx.lineWidth = thick;
+    ctx.beginPath(); ctx.moveTo(pad+q*cell, pad+r*cell); ctx.lineTo(pad+(q+1)*cell, pad+r*cell); ctx.stroke();
+  }
+  for (let r=0;r<n;r++) for (let q=0;q<=n;q++) {
+    const o = state.edges.v[r][q];
+    ctx.strokeStyle = edgeColor(o); ctx.lineWidth = thick;
+    ctx.beginPath(); ctx.moveTo(pad+q*cell, pad+r*cell); ctx.lineTo(pad+q*cell, pad+(r+1)*cell); ctx.stroke();
+  }
+  // dots
+  for (let r=0;r<=n;r++) for (let q=0;q<=n;q++) {
+    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(pad+q*cell, pad+r*cell, 6, 0, Math.PI*2); ctx.fill();
+  }
+}
+$('board').addEventListener('click', async (ev) => {
+  if (!state || state.status!=='active' || state.you==null || state.you!==state.current_seat) return;
+  const rect = $('board').getBoundingClientRect();
+  const x = (ev.clientX-rect.left) * ($('board').width/rect.width);
+  const y = (ev.clientY-rect.top) * ($('board').height/rect.height);
+  const n=state.grid, pad=36, cell=($('board').width-2*pad)/n;
+  // nearest free edge
+  let best=null, bestD=1e9;
+  for (let r=0;r<=n;r++) for (let q=0;q<n;q++) if (state.edges.h[r][q]==null) {
+    const x1=pad+q*cell, x2=pad+(q+1)*cell, yy=pad+r*cell;
+    const d = distToSeg(x,y,x1,yy,x2,yy);
+    if (d<bestD){bestD=d; best={orient:'h',r,c:q};}
+  }
+  for (let r=0;r<n;r++) for (let q=0;q<=n;q++) if (state.edges.v[r][q]==null) {
+    const y1=pad+r*cell, y2=pad+(r+1)*cell, xx=pad+q*cell;
+    const d = distToSeg(x,y,xx,y1,xx,y2);
+    if (d<bestD){bestD=d; best={orient:'v',r,c:q};}
+  }
+  if (!best || bestD>18) return;
+  try {
+    state = await api(`/api/games/${code}/move`, {method:'POST', body: JSON.stringify(best)});
+    render(); msg('Move sent');
+  } catch(e){ msg(e.message); $('msg').className='err'; }
+});
+function distToSeg(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1; const l2=dx*dx+dy*dy || 1;
+  let t=((px-x1)*dx+(py-y1)*dy)/l2; t=Math.max(0,Math.min(1,t));
+  const qx=x1+t*dx, qy=y1+t*dy; return Math.hypot(px-qx, py-qy);
+}
+async function refresh(){
+  if (!code) return;
+  try { state = await api(`/api/games/${code}`); render(); $('msg').className=''; }
+  catch(e){ msg(e.message); }
+}
+$('create').onclick = async () => {
+  try {
+    const j = await api('/api/games', {method:'POST', body: JSON.stringify({name:$('name').value})});
+    token=j.player_token; code=j.code; state=j.state; render(); startPoll(); msg('Created '+code);
+  } catch(e){ msg(e.message); }
+};
+$('join').onclick = async () => {
+  try {
+    code = $('code').value.trim().toUpperCase();
+    const j = await api(`/api/games/${code}/join`, {method:'POST', body: JSON.stringify({name:$('name').value})});
+    token=j.player_token; state=j.state; render(); startPoll(); msg('Joined '+code);
+  } catch(e){ msg(e.message); }
+};
+$('start').onclick = async () => {
+  try { state = await api(`/api/games/${code}/start`, {method:'POST', body:'{}'}); render(); msg('Started'); }
+  catch(e){ msg(e.message); }
+};
+$('bot').onclick = async () => {
+  try {
+    await api('/api/bot/fill', {method:'POST', body: JSON.stringify({code})});
+    await refresh(); msg('Bot seated');
+  } catch(e){ msg(e.message); }
+};
+function startPoll(){ if (poll) clearInterval(poll); poll=setInterval(async()=>{
+  await refresh();
+  // drive bots if present
+  if (state && state.status==='active') {
+    const cur = state.players.find(p=>p.seat===state.current_seat);
+    // server-side bots need /api/bot/step
+    try { await api('/api/bot/step', {method:'POST', body: JSON.stringify({code})}); await refresh(); } catch(_){}
+  }
+}, 1200); }
+</script>
+</body>
+</html>
