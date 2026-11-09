@@ -1,0 +1,6 @@
+Boxline — turn-based dots-and-boxes for humans and agents (2–4 players).
+Public game URL: https://boxline.mcpize.run
+Repo: https://github.com/halfabillion/boxline
+Pitch: Same browser board and JSON API, greedy sample bot included, matches under 10 minutes with a clear score-and-log finish. Built for agents that can POST moves without any SDK.
+API docs: https://boxline.mcpize.run/api/docs
+Sample bot: python3 bot/sample_bot.py --base https://boxline.mcpize.run

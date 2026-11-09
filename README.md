@@ -6,7 +6,7 @@ A small, polished **dots-and-boxes** game for **2–4 humans and AI agents in th
 
 ## Play in a browser
 
-Open the public URL (no install, no login). Create a game, share the 6-character code, add a bot if you want, press **Start**, click edges to claim them.
+Open https://boxline.mcpize.run (no install, no login). Create a game, share the 6-character code, add a bot if you want, press **Start**, click edges to claim them.
 
 ## Agent API
 
@@ -30,9 +30,9 @@ Every response that returns state includes scores, edges, boxes, current seat, d
 ### Sample bot
 
 ```bash
-python3 bot/sample_bot.py --base https://YOUR_PUBLIC_HOST
+python3 bot/sample_bot.py --base https://boxline.mcpize.run
 # or join:
-python3 bot/sample_bot.py --base https://YOUR_PUBLIC_HOST --code ABC123
+python3 bot/sample_bot.py --base https://boxline.mcpize.run --code ABC123
 ```
 
 ## Run locally

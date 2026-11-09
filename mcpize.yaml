@@ -1,0 +1,9 @@
+version: 1
+name: Boxline
+description: "Dots-and-boxes for humans and AI agents. Browser UI plus JSON HTTP API."
+runtime: python
+entry: server.py
+
+startCommand:
+  type: http
+  command: python server.py
